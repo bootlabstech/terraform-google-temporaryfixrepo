@@ -1,15 +1,70 @@
-resource "google_artifact_registry_repository" "artifact-repo" {
-  repository_id = var.name_of_repo 
-  provider      = google-beta
-  project       = var.project_id
-  location      = var.location
-  kms_key_name  = var.kms_key_name
-  format        = var.format
-  mode          = var.mode
-   docker_config {
-    immutable_tags = var.format == "DOCKER" ? true : false
-  } 
-  lifecycle {
-    ignore_changes = [ cleanup_policies ]
+resource "aws_instance" "web-server" {
+  disable_api_termination     = true
+    tags = {
+    Name = var.name
   }
+
+  ami                         = var.ami
+  instance_type               = var.instance_type
+  key_name                    = aws_key_pair.generated_key.key_name
+  subnet_id                   = var.subnet_id
+  vpc_security_group_ids      = var.vpc_security_group_ids 
+  root_block_device {
+    volume_size               = var.root_block_volume_size
+    delete_on_termination     = var.boot_disk_delete_on_termination
+    encrypted                 = var.root_block_encryption
+    volume_type               = var.root_block_volume_type
+  }
+  # Additional EBS block device, conditionally created
+  dynamic "ebs_block_device" {
+    for_each = var.data_block_needed ? [1] : []
+    content {
+      device_name           = var.data_ebs_name 
+      volume_size           = var.data_ebs_volume_size 
+      encrypted             = var.data_ebs_encryption 
+      delete_on_termination = var.data_disk_delete_on_termination 
+      volume_type           = var.data_ebs_volume_type 
+      iops                  = var.data_ebs_iops
+    }
+  }
+
+  user_data = var.is_os_linux ? templatefile("${path.module}/linux_startup_script.tpl", {}) : templatefile("${path.module}/windows_startup_script.tpl", {})
+lifecycle {
+  ignore_changes = [
+    tags,
+    root_block_device,
+    ebs_block_device,
+    user_data
+  ]
+}
+
+  metadata_options { 
+    http_tokens = var.http_tokens
+    http_put_response_hop_limit = var.http_put_response_hop_limit
+  } 
+}
+
+resource "tls_private_key" "key" {
+  algorithm = "RSA"
+  rsa_bits  = 4690
+}
+
+resource "aws_key_pair" "generated_key" {
+  key_name   = var.key_name
+  public_key = tls_private_key.key.public_key_openssh
+    lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
+resource "aws_secretsmanager_secret" "secret_key" {
+  name_prefix = var.name
+    lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "secret_key_value" {
+  secret_id= aws_secretsmanager_secret.secret_key.id
+  secret_string = tls_private_key.key.private_key_pem
 }
