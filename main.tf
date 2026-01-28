@@ -1,47 +1,60 @@
 resource "aws_instance" "web-server" {
-  disable_api_termination     = true
-    tags = {
+  disable_api_termination = true
+  tags = {
     Name = var.name
   }
 
-  ami                         = var.ami
-  instance_type               = var.instance_type
-  key_name                    = aws_key_pair.generated_key.key_name
-  subnet_id                   = var.subnet_id
-  vpc_security_group_ids      = var.vpc_security_group_ids 
+  ami                    = var.ami
+  instance_type          = var.instance_type
+  key_name               = aws_key_pair.generated_key.key_name
+  subnet_id              = var.subnet_id
+  vpc_security_group_ids = var.vpc_security_group_ids
   root_block_device {
-    volume_size               = var.root_block_volume_size
-    delete_on_termination     = var.boot_disk_delete_on_termination
-    encrypted                 = var.root_block_encryption
-    volume_type               = var.root_block_volume_type
+    volume_size           = var.root_block_volume_size
+    delete_on_termination = var.boot_disk_delete_on_termination
+    encrypted             = var.root_block_encryption
+    volume_type           = var.root_block_volume_type
   }
   # Additional EBS block device, conditionally created
   dynamic "ebs_block_device" {
     for_each = var.data_block_needed ? [1] : []
     content {
-      device_name           = var.data_ebs_name 
-      volume_size           = var.data_ebs_volume_size 
-      encrypted             = var.data_ebs_encryption 
-      delete_on_termination = var.data_disk_delete_on_termination 
-      volume_type           = var.data_ebs_volume_type 
+      device_name           = var.data_ebs_name
+      volume_size           = var.data_ebs_volume_size
+      encrypted             = var.data_ebs_encryption
+      delete_on_termination = var.data_disk_delete_on_termination
+      volume_type           = var.data_ebs_volume_type
       iops                  = var.data_ebs_iops
     }
   }
 
   user_data = var.is_os_linux ? templatefile("${path.module}/linux_startup_script.tpl", {}) : templatefile("${path.module}/windows_startup_script.tpl", {})
-lifecycle {
-  ignore_changes = [
-    tags,
-    root_block_device,
-    ebs_block_device,
-    user_data
-  ]
-}
+  lifecycle {
+    ignore_changes = [
+      tags,
+      root_block_device,
+      ebs_block_device,
+      user_data
+    ]
+  }
+  enclave_options {
+    enabled = false
+    }
 
-  metadata_options { 
-    http_tokens = var.http_tokens
+  private_dns_name_options {
+    enable_resource_name_dns_a_record    = false
+    enable_resource_name_dns_aaaa_record = false
+    hostname_type                        = "ip-name"
+  }
+  maintenance_options {
+    auto_recovery = "default"
+  }
+
+  metadata_options {
+    http_tokens                 = var.http_tokens
     http_put_response_hop_limit = var.http_put_response_hop_limit
-  } 
+    instance_metadata_tags = "disabled"
+  }
 }
 
 resource "tls_private_key" "key" {
@@ -52,19 +65,19 @@ resource "tls_private_key" "key" {
 resource "aws_key_pair" "generated_key" {
   key_name   = var.key_name
   public_key = tls_private_key.key.public_key_openssh
-    lifecycle {
+  lifecycle {
     ignore_changes = [tags]
   }
 }
 
 resource "aws_secretsmanager_secret" "secret_key" {
   name_prefix = var.name
-    lifecycle {
+  lifecycle {
     ignore_changes = [tags]
   }
 }
 
 resource "aws_secretsmanager_secret_version" "secret_key_value" {
-  secret_id= aws_secretsmanager_secret.secret_key.id
+  secret_id     = aws_secretsmanager_secret.secret_key.id
   secret_string = tls_private_key.key.private_key_pem
 }
