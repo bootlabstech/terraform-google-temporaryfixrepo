@@ -72,9 +72,9 @@ resource "google_compute_disk" "boot_disk" {
   type    = var.boot_disk_type
   image   = var.boot_disk_image
   zone    = var.zone
-    disk_encryption_key {
-    kms_key_self_link = var.kms_key_self_link
-  }
+  #   disk_encryption_key {
+  #   kms_key_self_link = var.kms_key_self_link
+  # }
 }
 resource "google_compute_disk" "additional_disk" {
   project = var.project_id
