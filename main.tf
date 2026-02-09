@@ -1,83 +1,121 @@
-resource "aws_instance" "web-server" {
-  disable_api_termination = true
-  tags = {
-    Name = var.name
+resource "google_compute_instance" "default" {
+  count        = var.no_of_instances
+  name         = "${var.name_of_instance}-${count.index}"
+  machine_type = var.machine_type
+  zone         = var.zone
+  project      = var.project_id
+  tags         = var.tags
+  advanced_machine_features {
+    enable_nested_virtualization = var.enable_nested_virtualization
+    threads_per_core             = var.threads_per_core
+  }
+  boot_disk {
+    source            = google_compute_disk.boot_disk[count.index].id
+    kms_key_self_link = var.kms_key_self_link == "" ? null : var.kms_key_self_link
   }
 
-  ami                    = var.ami
-  instance_type          = var.instance_type
-  key_name               = aws_key_pair.generated_key.key_name
-  subnet_id              = var.subnet_id
-  vpc_security_group_ids = var.vpc_security_group_ids
-  root_block_device {
-    volume_size           = var.root_block_volume_size
-    delete_on_termination = var.boot_disk_delete_on_termination
-    encrypted             = var.root_block_encryption
-    volume_type           = var.root_block_volume_type
+  // Allow the instance to be stopped by terraform when updating configuration
+  allow_stopping_for_update = var.allow_stopping_for_update
+
+  metadata = {
+    enable-oslogin             = var.enable_oslogin
+    windows-startup-script-ps1 = var.is_os_linux ? null : templatefile("${path.module}/windows_startup_script.tpl", {})
+
+    # Exclude startup_script key when using the Windows startup script
+    startup-script = var.is_os_linux ? templatefile("${path.module}/linux_startup_script.tpl", {}) : null
   }
-  # Additional EBS block device, conditionally created
-  dynamic "ebs_block_device" {
-    for_each = var.data_block_needed ? [1] : []
+
+  network_interface {
+    subnetwork = var.subnetwork
+    network_ip = var.address == "" ? null : var.address
+  }
+
+  dynamic "service_account" {
+    for_each = var.create_service_account ? [{}] : []
+
     content {
-      device_name           = var.data_ebs_name
-      volume_size           = var.data_ebs_volume_size
-      encrypted             = var.data_ebs_encryption
-      delete_on_termination = var.data_disk_delete_on_termination
-      volume_type           = var.data_ebs_volume_type
-      iops                  = var.data_ebs_iops
+      email  = google_service_account.default[0].email
+      scopes = var.service_account_scopes
     }
   }
 
-  user_data = var.is_os_linux ? templatefile("${path.module}/linux_startup_script.tpl", {}) : templatefile("${path.module}/windows_startup_script.tpl", {})
-  lifecycle {
-    ignore_changes = [
-      tags,
-      root_block_device,
-      ebs_block_device,
-      user_data
-    ]
+
+  shielded_instance_config {
+    enable_secure_boot          = var.enable_secure_boot
+    enable_integrity_monitoring = var.enable_integrity_monitoring
   }
-  enclave_options {
-    enabled = false
+
+  timeouts {
+    create = "10m"
+  }
+
+  lifecycle {
+    ignore_changes = [boot_disk,attached_disk, labels, tags]
+  }
+
+}
+
+resource "google_compute_address" "static" {
+  count        = var.address_type == "INTERNAL" ? (var.address == "" ? 0 : 1) : 1
+  name         = "${var.name_of_instance}-staticip"
+  project      = var.project_id
+  region       = var.compute_address_region
+  address_type = var.address_type
+  subnetwork   = var.subnetwork
+  address      = var.address_type == "INTERNAL" ? (var.address == "" ? null : var.address) : null
+}
+resource "google_compute_disk" "boot_disk" {
+  count   = var.no_of_instances
+  project = var.project_id
+  name    = "${var.name_of_instance}-${count.index}"
+  size    = var.boot_disk_size
+  type    = var.boot_disk_type
+  image   = var.boot_disk_image
+  zone    = var.zone
+    disk_encryption_key {
+    kms_key_self_link = var.kms_key_self_link
+  }
+}
+resource "google_compute_disk" "additional_disk" {
+  project = var.project_id
+  count   = var.additional_disk_needed ? var.no_of_instances : 0
+  name    = "${var.name_of_instance}-${count.index}-addtnl"
+  size    = var.disk_size
+  type    = var.disk_type
+  zone    = var.zone
+  #     disk_encryption_key {
+  #   kms_key_self_link = var.kms_key_self_link
+  # }
+}
+resource "google_compute_attached_disk" "attachvmtoaddtnl" {
+  count   = var.additional_disk_needed ? var.no_of_instances : 0
+  disk     = google_compute_disk.additional_disk[count.index].id
+  instance = "${var.name_of_instance}-${count.index}"
+  project  = var.project_id
+  zone     = var.zone
+  depends_on = [
+    google_compute_disk.additional_disk
+  ]
+}     
+resource "google_compute_resource_policy" "daily" {
+  project = var.project_id
+  name    = var.policy_name
+  region  = "asia-south1"
+  snapshot_schedule_policy {
+
+    schedule {
+      daily_schedule {
+        days_in_cycle = 1
+        start_time    = "01:00"
+      }
     }
-
-  private_dns_name_options {
-    enable_resource_name_dns_a_record    = false
-    enable_resource_name_dns_aaaa_record = false
-    hostname_type                        = "ip-name"
+    retention_policy {
+      max_retention_days    = 7
+      on_source_disk_delete = "KEEP_AUTO_SNAPSHOTS"
+    }
+    snapshot_properties {
+      storage_locations = ["asia"]
+      guest_flush       = true
+    }
   }
-  maintenance_options {
-    auto_recovery = "default"
-  }
-
-  metadata_options {
-    http_tokens                 = var.http_tokens
-    http_put_response_hop_limit = var.http_put_response_hop_limit
-    instance_metadata_tags = "disabled"
-  }
-}
-
-resource "tls_private_key" "key" {
-  algorithm = "RSA"
-  rsa_bits  = 4690
-}
-
-resource "aws_key_pair" "generated_key" {
-  key_name   = var.key_name
-  public_key = tls_private_key.key.public_key_openssh
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-resource "aws_secretsmanager_secret" "secret_key" {
-  name_prefix = var.name
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "secret_key_value" {
-  secret_id     = aws_secretsmanager_secret.secret_key.id
-  secret_string = tls_private_key.key.private_key_pem
 }
