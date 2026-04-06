@@ -1,121 +1,174 @@
-resource "google_compute_instance" "default" {
-  count        = var.no_of_instances
-  name         = "${var.name_of_instance}-${count.index}"
-  machine_type = var.machine_type
-  zone         = var.zone
-  project      = var.project_id
-  tags         = var.tags
-  advanced_machine_features {
-    enable_nested_virtualization = var.enable_nested_virtualization
-    threads_per_core             = var.threads_per_core
-  }
-  boot_disk {
-    source            = google_compute_disk.boot_disk[count.index].id
-    kms_key_self_link = var.kms_key_self_link == "" ? null : var.kms_key_self_link
-  }
+resource "google_project_service" "certapi" {
+  project = var.project_id
+  service = "certificatemanager.googleapis.com"
+}
 
-  // Allow the instance to be stopped by terraform when updating configuration
-  allow_stopping_for_update = var.allow_stopping_for_update
-
-  metadata = {
-    enable-oslogin             = var.enable_oslogin
-    windows-startup-script-ps1 = var.is_os_linux ? null : templatefile("${path.module}/windows_startup_script.tpl", {})
-
-    # Exclude startup_script key when using the Windows startup script
-    startup-script = var.is_os_linux ? templatefile("${path.module}/linux_startup_script.tpl", {}) : null
-  }
-
-  network_interface {
-    subnetwork = var.subnetwork
-    network_ip = var.address == "" ? null : var.address
-  }
-
-  dynamic "service_account" {
-    for_each = var.create_service_account ? [{}] : []
-
+resource "google_compute_instance_group" "instance_group" {
+  project     = var.project_id
+  name        = "${var.name}-umig"
+  description = var.description
+  zone        = var.zone
+  instances   = var.instances
+  network     = var.network
+  dynamic "named_port" {
+    for_each = var.enable_named_port ? [{}] : []
     content {
-      email  = google_service_account.default[0].email
-      scopes = var.service_account_scopes
+      name = "https"
+      port = var.port
     }
   }
-
-
-  shielded_instance_config {
-    enable_secure_boot          = var.enable_secure_boot
-    enable_integrity_monitoring = var.enable_integrity_monitoring
+  named_port {
+          name = "https" 
+          port = var.port
+        }
+  named_port {
+    name = "tcp8443"
+    port = var.tcp_port
   }
-
-  timeouts {
-    create = "10m"
-  }
-
-  lifecycle {
-    ignore_changes = [boot_disk,attached_disk, labels, tags]
-  }
-
+      
+   
 }
 
-resource "google_compute_address" "static" {
-  count        = var.address_type == "INTERNAL" ? (var.address == "" ? 0 : 1) : 1
-  name         = "${var.name_of_instance}-staticip"
+resource "google_compute_global_address" "default" {
   project      = var.project_id
-  region       = var.compute_address_region
-  address_type = var.address_type
-  subnetwork   = var.subnetwork
-  address      = var.address_type == "INTERNAL" ? (var.address == "" ? null : var.address) : null
+  name       = "${var.name}-ip"
+  ip_version = "IPV4"
+  address_type = "EXTERNAL"
 }
-resource "google_compute_disk" "boot_disk" {
-  count   = var.no_of_instances
-  project = var.project_id
-  name    = "${var.name_of_instance}-${count.index}"
-  size    = var.boot_disk_size
-  type    = var.boot_disk_type
-  image   = var.boot_disk_image
-  zone    = var.zone
-  #   disk_encryption_key {
-  #   kms_key_self_link = var.kms_key_self_link
-  # }
-}
-resource "google_compute_disk" "additional_disk" {
-  project = var.project_id
-  count   = var.additional_disk_needed ? var.no_of_instances : 0
-  name    = "${var.name_of_instance}-${count.index}-addtnl"
-  size    = var.disk_size
-  type    = var.disk_type
-  zone    = var.zone
-  #     disk_encryption_key {
-  #   kms_key_self_link = var.kms_key_self_link
-  # }
-}
-resource "google_compute_attached_disk" "attachvmtoaddtnl" {
-  count   = var.additional_disk_needed ? var.no_of_instances : 0
-  disk     = google_compute_disk.additional_disk[count.index].id
-  instance = "${var.name_of_instance}-${count.index}"
-  project  = var.project_id
-  zone     = var.zone
-  depends_on = [
-    google_compute_disk.additional_disk
-  ]
-}     
-resource "google_compute_resource_policy" "daily" {
-  project = var.project_id
-  name    = var.policy_name
-  region  = "asia-south1"
-  snapshot_schedule_policy {
-
-    schedule {
-      daily_schedule {
-        days_in_cycle = 1
-        start_time    = "01:00"
-      }
-    }
-    retention_policy {
-      max_retention_days    = 7
-      on_source_disk_delete = "KEEP_AUTO_SNAPSHOTS"
-    }
-    snapshot_properties {
-      storage_locations = ["asia"]
-      guest_flush       = true
-    }
+resource "google_compute_health_check" "default" {
+    project         = var.project_id
+  name               = "${var.name}-health-check"
+  check_interval_sec = 5
+  healthy_threshold  = 2
+  tcp_health_check {
+    port               = var.port
+    port_specification = "USE_FIXED_PORT"
+    proxy_header       = "PROXY_V1"
+    
   }
+  timeout_sec         = 5
+  unhealthy_threshold = 2
 }
+
+resource "google_compute_backend_service" "default" {
+  project               = var.project_id
+  name                            = "${var.name}-back-end"
+  connection_draining_timeout_sec = 0
+  health_checks                   = [google_compute_health_check.default.id]
+  load_balancing_scheme           = var.load_balancing_scheme
+  port_name                       = "https"
+  protocol                        = var.protocol
+  session_affinity                = "NONE"
+  timeout_sec                     = 90
+  backend {
+    group           = google_compute_instance_group.instance_group.id
+    balancing_mode  = "UTILIZATION"
+    max_connections              = 0 
+    max_connections_per_endpoint = 0 
+    max_connections_per_instance = 0
+    max_rate                     = 0
+    max_rate_per_endpoint        = 0
+    max_rate_per_instance        = 0
+    capacity_scaler = 1.0
+    max_utilization  = 1
+    
+  }
+  security_policy = var.security_policy
+}
+
+resource "google_compute_global_forwarding_rule" "forwarding_rule" {
+  project               = var.project_id
+  name                  = "${var.name}-forwarding-rule"
+  target                = google_compute_target_https_proxy.target-proxy.id
+  ip_protocol           = "TCP"
+  load_balancing_scheme = var.load_balancing_scheme
+  port_range            = "443"
+  ip_address            = google_compute_global_address.default.address
+   depends_on = [
+    google_compute_target_https_proxy.target-proxy
+  ]
+}
+
+resource "google_compute_target_https_proxy" "target-proxy" {
+  project = var.project_id
+  ssl_certificates = var.ssl_certificates 
+  name    = "${var.name}-target-proxy"
+  url_map = google_compute_url_map.url_map.id
+  depends_on = [
+    # google_compute_ssl_certificate.non-prod,
+    # google_compute_ssl_certificate.prod,
+    google_compute_url_map.url_map
+  ]
+  
+}
+
+resource "google_compute_url_map" "url_map" {
+  project         = var.project_id
+  name            = "${var.name}-url-map"
+  default_service = google_compute_backend_service.default.id
+  depends_on = [
+    google_compute_backend_service.default
+  ]
+}
+resource "google_compute_security_policy" "policy" { 
+     name = "${var.name}-cloud-policy"
+     project = var.project_id
+       rule {
+            action   = "deny(403)"
+           priority = "2147483647"
+            match {
+           versioned_expr = "SRC_IPS_V1"
+          config {
+               src_ip_ranges = ["*"]
+           }
+           }
+           description = "default rule"
+       }
+        rule {
+           action   = "allow" 
+           preview  = false 
+           priority = 1000 
+
+           match {
+              versioned_expr = "SRC_IPS_V1" 
+
+               config {
+                   src_ip_ranges = [
+                       "103.21.244.0/22",
+                      "103.22.200.0/22",
+                       "103.31.4.0/22",
+                       "108.162.192.0/18",
+                       "141.101.64.0/18",
+                       "173.245.48.0/20",
+                       "188.114.96.0/20",
+                       "190.93.240.0/20",
+                       "197.234.240.0/22",
+                       "198.41.128.0/17",
+                    ] 
+                }
+            }
+        }
+        rule {
+           action      = "allow" 
+           description = "rule 2" 
+           preview     = false 
+           priority    = 1001 
+
+           match {
+               versioned_expr = "SRC_IPS_V1" 
+
+               config {
+                   src_ip_ranges = [
+                       "104.16.0.0/13",
+                       "104.24.0.0/14",
+                       "131.0.72.0/22",
+                       "162.158.0.0/15",
+                       "172.64.0.0/13",
+                       "81.29.142.100/32"
+                    ] 
+                }
+            }
+        }
+
+        # (1 unchanged block hidden)
+    }

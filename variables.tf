@@ -1,131 +1,72 @@
-// required variables
-
-variable "no_of_instances" {
-  type        = number
-  description = "The number of instances to be created."
-}
-variable "name_of_instance" {
+variable "name" {
   type        = string
-  description = "The name of instances to be created."
+  description = "The name of the instance group"
+  
 }
-variable "machine_type" {
+variable "description" {
   type        = string
-  description = "The type of machine to be created."
+  description = "description of the instance group"
+  default = "Application load balancer for unmanaged instance"
 }
 variable "zone" {
   type        = string
-  description = "The zone of the VM."
+  description = "The zone that this instance group should be created in."
+  
 }
-variable "boot_disk_size" {
-  type        = number
-  description = "The boot_disk_size of the VM."
-}
-
-variable "boot_disk_type" {
-  type        = string
-  description = "The boot_disk_type of the VM."
-}
-
-variable "boot_disk_image" {
-  type        = string
-  description = "The boot_disk_image of the VM."
-}
-
-variable "compute_address_region" {
-  type        = string
-  description = "The region that the compute address should be created in. If it is not provided, the provider zone is used."
-}
-variable "compute_address_project" {
-  type        = string
-  description = "The ID of the project in which the resource belongs. If it is not provided, the provider project is used."
-}
-variable "is_os_linux" {
-  type        = bool
-  description = "Executes different metadata scripts on this basis."
-}
-
-variable "enable_secure_boot" {
-  type    = bool
-  default = true
-}
-variable "enable_integrity_monitoring" {
-  type    = bool
-  default = true
-}
-variable "enable_oslogin" {
-  type    = string
-  default = "TRUE"
-}
-variable "enable_nested_virtualization" {
-  type        = bool
-  description = "enable_nested_virtualization"
-}
-variable "threads_per_core" {
-  type        = number
-  description = "the number of threads per physical core. To disable simultaneous multithreading (SMT) set this to 1"
-}
-
-// optional variables
-
 variable "project_id" {
   type        = string
-  description = "The ID of the project in which the resource belongs. If it is not provided, the provider project is used."
+  description = " The ID of the project in which the resource belongs. If it is not provided, the provider project is used."
+  
 }
-
-variable "tags" {
-  type        = list(string)
-  description = "A list of network tags to attach to the instance."
-}
-variable "subnetwork" {
+variable "network" {
   type        = string
-  description = "The name or self_link of the subnetwork to attach this interface to. Either network or subnetwork must be provided."
+  description = "The URL of the network the instance group is in. If this is different from the network where the instances are in, the creation fails."
+
 }
-variable "enable_startup_script" {
-  type        = bool
-  description = "Enable startup script, include startup.sh"
+variable "port" {
+  type        = string
+  description = "The name which the port will be mapped to."
+
+
 }
-variable "create_service_account" {
+variable "named_port_name_port" {
+  type        = string
+  description = "The port number to map the name to."
+  default     = "https"
+}
+variable "instances" {
+  type        = list(string)
+  description = "The list of instances in the group, in self_link format. When adding instances they must all be in the same network and zone as the instance group."
+
+}
+variable "enable_named_port" {
   type        = bool
-  description = "Create service account for the compute instance"
+  description = "enable the port"
   default     = false
 }
-variable "service_account_scopes" {
-  type        = list(string)
-  description = "A list of service scopes. Both OAuth2 URLs and gcloud short names are supported. To allow full access to all Cloud APIs, use the cloud-platform scope."
-  default     = ["cloud-platform"]
+variable "ssl_certificates" {
+    type=list(string)
+    description = "SSL certificate"     
 }
-variable "allow_stopping_for_update" {
-  type        = bool
-  description = "If true, allows Terraform to stop the instance to update its properties. If you try to update a property that requires stopping the instance without setting this field, the update will fail."
-  default     = true
+variable "protocol" {
+  type = string
+  description = "protocol for data "
+  default = "HTTPS"
+  
 }
-variable "kms_key_self_link" {
-  type        = string
-  description = "The self_link of the encryption key that is stored in Google Cloud KMS to encrypt this disk."
-}
-variable "additional_disk_needed" {
-  type        = bool
-  description = "Is Additional disk needed."
+variable "load_balancing_scheme" {
+  type = string
+  description = "type of alb external or internal"
+  default = "EXTERNAL"
+  
 }
 
-variable "address_type" {
-  type        = string
-  description = "The type of address to reserve. Default value is EXTERNAL. Possible values are INTERNAL and EXTERNAL"
+variable "security_policy" {
+  type = string
+  description = "security policy"
 }
-variable "address" {
-  type        = string
-  description = "The private ip of the compute-instance"
-  default     = ""
-}
-variable "policy_name" {
-  type        = string
-  description = "the policy  name for snapshot scheduler"
-}
-variable "disk_type" {
-  type        = string
-  description = "The additional_disk_type of the VM."
-}
-variable "disk_size" {
-  type        = number
-  description = "The addtnl_disk_size of the VM."
+
+variable "tcp_port" {
+  type = string
+  description = "security policy"
 }
