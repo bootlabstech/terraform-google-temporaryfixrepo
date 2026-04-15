@@ -113,6 +113,7 @@ resource "google_compute_url_map" "url_map" {
     ignore_changes = [host_rule, path_matcher, ]
   }
 }
+
 resource "google_compute_security_policy" "policy" { 
      name = "${var.name}-cloud-policy"
      project = var.project_id
