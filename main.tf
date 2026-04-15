@@ -99,6 +99,10 @@ resource "google_compute_target_https_proxy" "target-proxy" {
     # google_compute_ssl_certificate.prod,
     google_compute_url_map.url_map
   ]
+  lifecycle {
+    ignore_changes = [host_rule, path_matcher, ]
+  }
+
   
 }
 
